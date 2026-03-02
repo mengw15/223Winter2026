@@ -56,68 +56,104 @@ mvn exec:java -Dexec.mainClass="org.cs223.Main" \
 ## Workloads
 
 ### Workload 1: Bank Transfer
-- **Data**: 500 accounts (`Data/workload1/input1.txt`)
-- **Transaction**: Transfer $1 from one account to another (2 keys per transaction)
+- **Data**: 500 accounts with initial balances (`Data/workload1/input1.txt`)
+- **Transaction**: Transfer $1 from one randomly selected account to another
+- Each transaction reads 2 keys and writes 2 keys
+- Contention arises when multiple threads select overlapping accounts
 
 ### Workload 2: TPC-C Style
 - **Data**: 8 warehouses, 80 districts, 8000 customers, 100 items, 800 stocks (`Data/workload2/input2.txt`)
-- **Transactions**:
-  - **NewOrder**: Read 1 district + 3 stocks, update order ID and stock quantities (4 keys)
-  - **Payment**: Read 1 warehouse + 1 district + 1 customer, update balances and payment counts (3 keys)
-- Transactions run in equal proportions (50% NewOrder, 50% Payment)
+- **Transactions** (run in equal proportions, 50/50):
+  - **NewOrder** (4 keys): Reads a district to generate an order ID (`next_o_id + 1`), then reads and updates 3 stock items (decrement `qty`, increment `ytd` and `order_cnt`)
+  - **Payment** (3 keys): Updates warehouse `ytd`, district `ytd`, and customer `balance`/`ytd_payment`/`payment_cnt`
+- Cross-transaction contention: both NewOrder and Payment write to district keys, creating natural conflicts between different transaction types
 
 ## Concurrency Control Protocols
 
 ### Optimistic Concurrency Control (OCC)
-- Transactions execute without locks during the read/write phase
-- Writes are buffered privately
-- At commit time, sequential validation checks for conflicts with concurrent transactions
-- Validation checks: (1) no committed transaction wrote a key we read, (2) no in-progress validated transaction writes a key we also write
-- Write phase executes outside the validation lock
-- On validation failure, the transaction aborts and retries with exponential backoff
+
+**Execution flow:**
+1. **Begin**: Snapshot the set of finished transactions (`ignore set`) — these completed before we started and are safe to ignore during validation
+2. **Read/Write phase**: Execute transaction logic without any locks. Reads go to RocksDB (or the private write buffer if the key was already written). Writes are buffered privately in a `HashMap`, not applied to the database
+3. **Validation phase** (sequential — one transaction validates at a time):
+   - Acquire a global validation lock
+   - **Check 1**: For every transaction that was validated after we started (`validated - ignore`), verify that its write set does not overlap with our read set (`RS(Tj) ∩ WS(Ti) = ∅`). This ensures we did not read stale data
+   - **Check 2**: For every such transaction that has not yet finished its write phase, verify that its write set does not overlap with our write set (`WS(Tj) ∩ WS(Ti) = ∅`). This prevents concurrent write conflicts
+   - If both checks pass: add this transaction to the `validated` set and release the validation lock
+   - If either check fails: release the lock and abort
+4. **Write phase**: Apply the private write buffer to RocksDB. This happens **outside** the validation lock, allowing other transactions to validate concurrently
+5. **Finish**: Mark the transaction as `finished` so future transactions can add it to their ignore set
+
+**On abort**: The transaction retries with exponential backoff plus random jitter (e.g., `2^attempt + random(0-4)` ms) to avoid repeated collisions
 
 ### Conservative Two-Phase Locking (Conservative 2PL)
-- Transactions declare all required keys upfront
-- All locks (exclusive) must be acquired before execution begins
-- If any lock is unavailable, all held locks are released immediately
-- Keys are sorted before acquisition to reduce conflicts
-- Livelock prevention via exponential backoff with random jitter
-- All locks are released after transaction commits
+
+**Execution flow:**
+1. **Declare keys**: Each transaction declares all keys it will access before execution (known from the transaction template)
+2. **Acquire all locks**:
+   - Keys are **sorted alphabetically** before acquisition to ensure a consistent global ordering, reducing the chance of mutual blocking
+   - Use `tryLock()` (non-blocking) on each key in order
+   - If **any** lock cannot be acquired: immediately **release all** locks already held and return failure. This is the key property — no transaction ever holds locks while waiting, making **deadlocks impossible**
+3. **Execute**: With all locks held, read from RocksDB, perform logic, buffer writes
+4. **Commit**: Apply the write buffer to RocksDB
+5. **Release all locks**
+
+**Livelock prevention**: Since transactions release all locks on failure and retry, there is a risk of livelock — multiple transactions repeatedly failing and retrying at the same time, never making progress. We address this with:
+- **Exponential backoff**: Each retry waits longer (`2^attempt` ms, capped at `2^10 = 1024` ms)
+- **Random jitter**: Each wait adds a random component (`random(0-4)` ms) so that competing transactions wake up at different times and don't collide again
+- **Max retries**: A safety cap of 100 retries prevents infinite loops in pathological cases
+
+**Lock type**: All accesses (both reads and writes) use exclusive locks for simplicity. This is more conservative than using shared/exclusive locks but avoids the complexity of lock upgrades.
+
+## Contention Model
+
+Contention is controlled by two parameters: `--contention` (probability `p`) and `--hotset` (size `h`):
+
+- With probability `p`, a key is selected from the **hotset** (the first `h` keys in each key pool)
+- With probability `1 - p`, a key is selected uniformly from the **full keyspace**
+
+| Contention | Behavior |
+|------------|----------|
+| `p = 0.0` | All keys selected uniformly — minimal conflicts |
+| `p = 0.5` | Half the selections target hot keys — moderate conflicts |
+| `p = 1.0` | All selections from hotset — maximum conflicts |
+
+Shrinking the hotset size or increasing `p` both increase contention. For example, `--contention 0.8 --hotset 5` creates very high contention as 80% of accesses target just 5 keys.
 
 ## Project Structure
 
 ```
 src/main/java/org/cs223/
-├── Main.java                 # CLI entry point, argument parsing
-├── Database.java             # RocksDB wrapper with map serialization
-├── Transaction.java          # Transaction with read set, write buffer
-├── TransactionManager.java   # Thread pool, workload execution, stats
-├── LockManager.java          # Conservative 2PL lock manager
-├── OCCValidator.java         # OCC validation with finished/validated sets
+├── Main.java                 # CLI entry point, argument parsing, workload setup
+├── Database.java             # RocksDB wrapper with map serialization/deserialization
+├── Transaction.java          # Transaction state: read set, write buffer, timing
+├── TransactionManager.java   # Thread pool execution, retry logic, stats collection
+├── LockManager.java          # Conservative 2PL: per-key ReentrantLocks, acquire-all-or-release-all
+├── OCCValidator.java         # OCC: validated/finished sets, sequential validation
 ├── parser/
-│   └── InsertParser.java     # Parses INSERT data files into RocksDB
+│   └── InsertParser.java     # Parses INSERT data files, loads into RocksDB
 ├── template/
-│   ├── TransactionTemplate.java   # Interface for transaction logic
-│   ├── TransferTemplate.java      # Workload 1: bank transfer
-│   ├── NewOrderTemplate.java      # Workload 2: new order
-│   └── PaymentTemplate.java       # Workload 2: payment
+│   ├── TransactionTemplate.java   # Interface: getNumKeys(), execute(), getName()
+│   ├── TransferTemplate.java      # Workload 1: read 2 accounts, transfer $1
+│   ├── NewOrderTemplate.java      # Workload 2: read district + 3 stocks, update
+│   └── PaymentTemplate.java       # Workload 2: read warehouse + district + customer, update
 └── test/
-    ├── TestDatabase.java
-    ├── TestLockManager.java
-    ├── TestOCC.java
-    ├── TestTransaction.java
-    └── TestTransactionManager.java
+    ├── TestDatabase.java          # RocksDB CRUD operations
+    ├── TestLockManager.java       # Lock acquire/release, multi-thread contention
+    ├── TestOCC.java               # Validation pass, conflict detection, abort
+    ├── TestTransaction.java       # Read/write buffer, apply writes
+    └── TestTransactionManager.java # End-to-end: OCC vs 2PL with multiple threads
 ```
 
 ## Output
 
 Each run prints:
 - Total committed transactions
-- Total retries and retry rate
-- Throughput (transactions/second)
-- Average response time (ms)
-- Per-template breakdown (for Workload 2)
+- Total retries and retry rate (percentage of attempts that failed)
+- Throughput (committed transactions per second)
+- Average response time (ms, from transaction begin to commit)
+- Per-template breakdown for Workload 2 (NewOrder vs Payment stats)
 
 ## Dependencies
 
-- [RocksDB](https://rocksdb.org/) via `rocksdbjni 9.6.1` (managed by Maven)
+- [RocksDB](https://rocksdb.org/) via `rocksdbjni 9.6.1` (managed by Maven, no manual installation needed)
