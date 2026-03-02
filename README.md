@@ -120,6 +120,55 @@ Contention is controlled by two parameters: `--contention` (probability `p`) and
 
 Shrinking the hotset size or increasing `p` both increase contention. For example, `--contention 0.8 --hotset 5` creates very high contention as 80% of accesses target just 5 keys.
 
+## Running Experiments
+
+### Single Run
+
+Use `org.cs223.Main` with command-line arguments to run a single experiment (see examples above).
+
+Each run automatically exports results to the `results/` directory:
+- `results/summary.csv` — one row appended per run with throughput, retry rate, avg response time
+- `results/rt_w1_OCC_t4_c0.50.csv` — per-transaction response times for that run
+
+### Batch Run (All Combinations)
+
+Run `org.cs223.ExperimentRunner` to automatically execute all parameter combinations:
+
+- **Workloads**: 1 and 2
+- **Protocols**: OCC and Conservative 2PL
+- **Thread counts**: 1, 2, 4, 8
+- **Contention levels**: 0, 0.2, 0.5, 0.8, 1.0
+
+This runs **80 experiments** sequentially (2 × 2 × 4 × 5). Each experiment creates a fresh database, loads the workload data, executes 10,000 transactions, and exports results.
+
+To run from IntelliJ: right-click `ExperimentRunner.java` → Run.
+
+Configuration constants at the top of `ExperimentRunner.java`:
+```java
+static final int[] THREAD_COUNTS = {1, 2, 4, 8};
+static final double[] CONTENTION_LEVELS = {0, 0.2, 0.5, 0.8, 1.0};
+static final int HOTSET_SIZE = 10;
+static final int NUM_TRANSACTIONS = 10000;
+```
+
+### Exported Results
+
+All results are written to the `results/` directory:
+
+| File | Contents |
+|------|----------|
+| `summary.csv` | One row per experiment: workload, protocol, threads, contention, hotset, transactions, committed, retries, retry_rate, throughput, avg_response_time |
+| `rt_w{N}_{PROTO}_t{T}_c{C}.csv` | Per-transaction response times for a specific run, with columns: template, response_time_ms |
+
+`summary.csv` example:
+```
+workload,protocol,threads,contention,hotset,transactions,committed,retries,retry_rate,throughput,avg_response_time
+1,OCC,4,0.50,10,10000,10000,330,3.19,19942.81,0.0366
+1,TWO_PL,4,0.50,10,10000,10000,120,1.18,18500.00,0.0410
+```
+
+These CSV files can be read directly by Python/matplotlib for plotting.
+
 ## Project Structure
 
 ```
