@@ -13,7 +13,7 @@ public class ExperimentRunner {
 
     static final int[] THREAD_COUNTS = {1, 2, 4, 8};
     static final double[] CONTENTION_LEVELS = {0, 0.2, 0.5, 0.8, 1.0};
-    static final int HOTSET_SIZE = 3;
+    static final int HOTSET_SIZE = 20;
     static final int NUM_TRANSACTIONS = 10000;
 
     public static void main(String[] args) throws Exception {
