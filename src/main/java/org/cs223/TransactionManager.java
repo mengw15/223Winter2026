@@ -85,6 +85,11 @@ public class TransactionManager {
 
         executor.shutdown();
 
+        // Compute and store stats
+        int totalAttempts = totalCommitted.get() + totalRetries.get();
+        lastRetryRate = totalAttempts > 0 ? totalRetries.get() * 100.0 / totalAttempts : 0;
+        lastThroughput = totalCommitted.get() / totalTimeSec;
+
         // Print results
         System.out.println("=== Results (" + protocol + ") ===");
         System.out.println("Threads: " + numThreads);
@@ -92,9 +97,8 @@ public class TransactionManager {
         System.out.println("Hotset size: " + hotsetSize);
         System.out.println("Committed: " + totalCommitted.get());
         System.out.println("Total retries: " + totalRetries.get());
-        int totalAttempts = totalCommitted.get() + totalRetries.get();
-        System.out.printf("Retry rate: %.2f%%\n", totalAttempts > 0 ? totalRetries.get() * 100.0 / totalAttempts : 0);
-        System.out.printf("Throughput: %.2f txns/sec\n", totalCommitted.get() / totalTimeSec);
+        System.out.printf("Retry rate: %.2f%%\n", lastRetryRate);
+        System.out.printf("Throughput: %.2f txns/sec\n", lastThroughput);
         System.out.printf("Avg response time: %.4f ms\n", getAvgResponseTimeMs());
 
         // Per-template stats
@@ -208,6 +212,9 @@ public class TransactionManager {
         }
     }
 
+    private double lastThroughput;
+    private double lastRetryRate;
+
     public double getAvgResponseTimeMs() {
         if (responseTimes.isEmpty()) return 0;
         return responseTimes.stream().mapToDouble(Double::doubleValue).average().orElse(0);
@@ -216,5 +223,7 @@ public class TransactionManager {
     public List<Double> getResponseTimes() { return new ArrayList<>(responseTimes); }
     public int getTotalCommitted() { return totalCommitted.get(); }
     public int getTotalRetries() { return totalRetries.get(); }
+    public double getLastThroughput() { return lastThroughput; }
+    public double getLastRetryRate() { return lastRetryRate; }
     public Map<String, List<Double>> getResponseTimesByTemplate() { return responseTimesByTemplate; }
 }

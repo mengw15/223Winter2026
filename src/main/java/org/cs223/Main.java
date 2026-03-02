@@ -82,6 +82,7 @@ public class Main {
 
         TransactionManager tm = new TransactionManager(db, proto);
         tm.runWorkload(keyPools, hotsetSize, contention, threads, numTxns, templates);
+        exportStats(1, proto, threads, contention, hotsetSize, numTxns, tm);
     }
 
     static void runWorkload2(Database db, TransactionManager.Protocol proto,
@@ -109,5 +110,19 @@ public class Main {
 
         TransactionManager tm = new TransactionManager(db, proto);
         tm.runWorkload(keyPools, hotsetSize, contention, threads, numTxns, templates);
+        exportStats(2, proto, threads, contention, hotsetSize, numTxns, tm);
+    }
+
+    static void exportStats(int workload, TransactionManager.Protocol proto,
+                            int threads, double contention, int hotsetSize, int numTxns,
+                            TransactionManager tm) throws Exception {
+        Stats.appendSummary(workload, proto.toString(), threads, contention, hotsetSize, numTxns,
+                tm.getTotalCommitted(), tm.getTotalRetries(), tm.getLastRetryRate(),
+                tm.getLastThroughput(), tm.getAvgResponseTimeMs());
+
+        Stats.writeResponseTimes(workload, proto.toString(), threads, contention,
+                tm.getResponseTimesByTemplate());
+
+        System.out.println("\nResults exported to results/");
     }
 }

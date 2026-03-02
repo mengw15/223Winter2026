@@ -45,3 +45,6 @@ testdb/
 
 ### IDE ###
 .idea/
+
+### Experiment results ###
+results/
