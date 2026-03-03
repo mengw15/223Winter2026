@@ -146,15 +146,19 @@ public class TransactionManager {
                 return;
             }
 
-            // Retry with exponential backoff + jitter
             totalRetries.incrementAndGet();
             retriesByTemplate.get(templateName).incrementAndGet();
-            try {
-                long backoff = (long) (Math.pow(2, Math.min(attempt, 10)) + rand.nextInt(5));
-                Thread.sleep(backoff);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
+
+            // Only 2PL needs backoff+jitter to prevent livelock
+            // OCC aborts at validation — no mutual blocking, so immediate retry is fine
+            if (protocol == Protocol.TWO_PL) {
+                try {
+                    long backoff = (long) (Math.pow(2, Math.min(attempt, 10)) + rand.nextInt(5));
+                    Thread.sleep(backoff);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             }
         }
     }
