@@ -63,7 +63,7 @@ public class ExperimentRunner {
                         Stats.appendSummary(1, proto.toString(), threads, contention, hotsetSize, NUM_TRANSACTIONS,
                                 tm.getTotalCommitted(), tm.getTotalRetries(), tm.getLastRetryRate(),
                                 tm.getLastThroughput(), tm.getAvgResponseTimeMs());
-                        Stats.writeResponseTimes(1, proto.toString(), threads, contention,
+                        Stats.writeResponseTimes(1, proto.toString(), threads, contention, hotsetSize,
                                 tm.getResponseTimesByTemplate());
 
                         db.close();
@@ -105,7 +105,7 @@ public class ExperimentRunner {
                         Stats.appendSummary(2, proto.toString(), threads, contention, hotsetSize, NUM_TRANSACTIONS,
                                 tm.getTotalCommitted(), tm.getTotalRetries(), tm.getLastRetryRate(),
                                 tm.getLastThroughput(), tm.getAvgResponseTimeMs());
-                        Stats.writeResponseTimes(2, proto.toString(), threads, contention,
+                        Stats.writeResponseTimes(2, proto.toString(), threads, contention, hotsetSize,
                                 tm.getResponseTimesByTemplate());
 
                         db.close();

@@ -40,11 +40,11 @@ public class Stats {
      * Write per-transaction response times to a CSV file.
      */
     public static void writeResponseTimes(int workload, String protocol, int threads,
-                                           double contention,
+                                           double contention, int hotsetSize,
                                            Map<String, List<Double>> responseTimesByTemplate) throws IOException {
         ensureDir();
-        String filename = String.format("%s/rt_w%d_%s_t%d_c%.2f.csv",
-                RESULTS_DIR, workload, protocol, threads, contention);
+        String filename = String.format("%s/rt_w%d_%s_t%d_c%.2f_h%d.csv",
+                RESULTS_DIR, workload, protocol, threads, contention,hotsetSize);
 
         try (PrintWriter pw = new PrintWriter(new FileWriter(filename))) {
             pw.println("template,response_time_ms");
