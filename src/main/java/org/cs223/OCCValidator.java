@@ -1,10 +1,8 @@
 package org.cs223;
 
 import java.util.*;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class OCCValidator {
-    private final ReentrantLock validationLock = new ReentrantLock();
 
     // Transactions that passed validation (may still be in write phase)
     private final List<ValidatedRecord> validated = new ArrayList<>();
@@ -25,13 +23,8 @@ public class OCCValidator {
      * Take a snapshot of finished transactions at transaction start.
      * These will be ignored during validation since they completed before we started.
      */
-    public Set<Integer> snapshotFinished() {
-        validationLock.lock();
-        try {
-            return new HashSet<>(finished);
-        } finally {
-            validationLock.unlock();
-        }
+    public synchronized Set<Integer> snapshotFinished() {
+        return new HashSet<>(finished);
     }
 
     /**
@@ -40,65 +33,50 @@ public class OCCValidator {
      * - Check 2: For all Ti validated after we started AND not yet finished: WS(Tj) ∩ WS(Ti) = empty
      * If valid, adds to validated set and returns true. Write phase happens OUTSIDE this method.
      */
-    public boolean validate(Transaction txn, Set<Integer> ignoreTxns) {
-        validationLock.lock();
-        try {
-            Set<String> readKeys = txn.getReadSet().keySet();
-            Set<String> writeKeys = txn.getWriteBuffer().keySet();
+    public synchronized boolean validate(Transaction txn, Set<Integer> ignoreTxns) {
+        Set<String> readKeys = txn.getReadSet().keySet();
+        Set<String> writeKeys = txn.getWriteBuffer().keySet();
 
-            for (ValidatedRecord record : validated) {
-                // Skip transactions that finished before we started
-                if (ignoreTxns.contains(record.txnId)) {
-                    continue;
-                }
+        for (ValidatedRecord record : validated) {
+            // Skip transactions that finished before we started
+            if (ignoreTxns.contains(record.txnId)) {
+                continue;
+            }
 
-                // Check 1: no one who validated after we started wrote what we read
-                for (String writeKey : record.writeSet) {
-                    if (readKeys.contains(writeKey)) {
-                        return false;
-                    }
-                }
-
-                // Check 2: if Ti hasn't finished writing yet, our write set can't overlap
-                if (!finished.contains(record.txnId)) {
-                    for (String writeKey : record.writeSet) {
-                        if (writeKeys.contains(writeKey)) {
-                            return false;
-                        }
-                    }
+            // Check 1: no one who validated after we started wrote what we read
+            for (String writeKey : record.writeSet) {
+                if (readKeys.contains(writeKey)) {
+                    return false;
                 }
             }
 
-            // Validation passed: add to validated set
-            validated.add(new ValidatedRecord(txn.getTxnId(), new HashSet<>(writeKeys)));
-            return true;
-        } finally {
-            validationLock.unlock();
+            // Check 2: if Ti hasn't finished writing yet, our write set can't overlap
+            if (!finished.contains(record.txnId)) {
+                for (String writeKey : record.writeSet) {
+                    if (writeKeys.contains(writeKey)) {
+                        return false;
+                    }
+                }
+            }
         }
+
+        // Validation passed: add to validated set
+        validated.add(new ValidatedRecord(txn.getTxnId(), new HashSet<>(writeKeys)));
+        return true;
     }
 
     /**
      * Called after write phase completes. Marks the transaction as finished.
      */
-    public void markFinished(int txnId) {
-        validationLock.lock();
-        try {
-            finished.add(txnId);
-        } finally {
-            validationLock.unlock();
-        }
+    public synchronized void markFinished(int txnId) {
+        finished.add(txnId);
     }
 
     /**
      * Clear all state (call between workload runs).
      */
-    public void reset() {
-        validationLock.lock();
-        try {
-            validated.clear();
-            finished.clear();
-        } finally {
-            validationLock.unlock();
-        }
+    public synchronized void reset() {
+        validated.clear();
+        finished.clear();
     }
 }
