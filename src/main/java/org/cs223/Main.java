@@ -120,7 +120,7 @@ public class Main {
                 tm.getTotalCommitted(), tm.getTotalRetries(), tm.getLastRetryRate(),
                 tm.getLastThroughput(), tm.getAvgResponseTimeMs());
 
-        Stats.writeResponseTimes(workload, proto.toString(), threads, contention,
+        Stats.writeResponseTimes(workload, proto.toString(), threads, contention, hotsetSize,
                 tm.getResponseTimesByTemplate());
 
         System.out.println("\nResults exported to results/");
