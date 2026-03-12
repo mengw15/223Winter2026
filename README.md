@@ -76,15 +76,15 @@ mvn exec:java -Dexec.mainClass="org.cs223.Main" \
 1. **Begin**: Snapshot the set of finished transactions (`ignore set`) — these completed before we started and are safe to ignore during validation
 2. **Read/Write phase**: Execute transaction logic without any locks. Reads go to RocksDB (or the private write buffer if the key was already written). Writes are buffered privately in a `HashMap`, not applied to the database
 3. **Validation phase** (sequential — one transaction validates at a time):
-   - Acquire a global validation lock
+   - Enter a `synchronized` validation method (ensures sequential validation — one transaction at a time)
    - **Check 1**: For every transaction that was validated after we started (`validated - ignore`), verify that its write set does not overlap with our read set (`RS(Tj) ∩ WS(Ti) = ∅`). This ensures we did not read stale data
    - **Check 2**: For every such transaction that has not yet finished its write phase, verify that its write set does not overlap with our write set (`WS(Tj) ∩ WS(Ti) = ∅`). This prevents concurrent write conflicts
-   - If both checks pass: add this transaction to the `validated` set and release the validation lock
-   - If either check fails: release the lock and abort
+   - If both checks pass: add this transaction to the `validated` set and return
+   - If either check fails: return failure and abort
 4. **Write phase**: Apply the private write buffer to RocksDB. This happens **outside** the validation lock, allowing other transactions to validate concurrently
 5. **Finish**: Mark the transaction as `finished` so future transactions can add it to their ignore set
 
-**On abort**: The transaction retries with exponential backoff plus random jitter (e.g., `2^attempt + random(0-4)` ms) to avoid repeated collisions
+**On abort**: The transaction retries immediately with newly selected keys. Unlike Conservative 2PL, OCC does not use backoff because there is no risk of livelock — conflicts are detected at validation time and the failing transaction simply restarts
 
 ### Conservative Two-Phase Locking (Conservative 2PL)
 
@@ -139,7 +139,7 @@ Run `org.cs223.ExperimentRunner` to automatically execute all parameter combinat
 - **Thread counts**: 1, 2, 4, 8
 - **Contention levels**: 0, 0.2, 0.5, 0.8, 1.0
 
-This runs **80 experiments** sequentially (2 × 2 × 4 × 5). Each experiment creates a fresh database, loads the workload data, executes 10,000 transactions, and exports results.
+This runs **400 experiments** sequentially (2 × 2 × 4 × 5 × 5). Each experiment creates a fresh database, loads the workload data, executes 10,000 transactions, and exports results.
 
 To run from IntelliJ: right-click `ExperimentRunner.java` → Run.
 
@@ -147,7 +147,7 @@ Configuration constants at the top of `ExperimentRunner.java`:
 ```java
 static final int[] THREAD_COUNTS = {1, 2, 4, 8};
 static final double[] CONTENTION_LEVELS = {0, 0.2, 0.5, 0.8, 1.0};
-static final int HOTSET_SIZE = 10;
+static final int[] HOTSET_SIZES = {5, 10, 20, 50, 100};
 static final int NUM_TRANSACTIONS = 10000;
 ```
 
@@ -158,7 +158,7 @@ All results are written to the `results/` directory:
 | File | Contents |
 |------|----------|
 | `summary.csv` | One row per experiment: workload, protocol, threads, contention, hotset, transactions, committed, retries, retry_rate, throughput, avg_response_time |
-| `rt_w{N}_{PROTO}_t{T}_c{C}.csv` | Per-transaction response times for a specific run, with columns: template, response_time_ms |
+| `rt_w{N}_{PROTO}_t{T}_c{C}_h{H}.csv` | Per-transaction response times for a specific run, with columns: template, response_time_ms |
 
 `summary.csv` example:
 ```
@@ -178,7 +178,9 @@ src/main/java/org/cs223/
 ├── Transaction.java          # Transaction state: read set, write buffer, timing
 ├── TransactionManager.java   # Thread pool execution, retry logic, stats collection
 ├── LockManager.java          # Conservative 2PL: per-key ReentrantLocks, acquire-all-or-release-all
-├── OCCValidator.java         # OCC: validated/finished sets, sequential validation
+├── OCCValidator.java         # OCC: synchronized validation, validated/finished sets
+├── Stats.java                # CSV export: summary.csv and per-transaction response times
+├── ExperimentRunner.java     # Batch runner: sweeps all parameter combinations
 ├── parser/
 │   └── InsertParser.java     # Parses INSERT data files, loads into RocksDB
 ├── template/
