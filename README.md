@@ -48,9 +48,9 @@ mvn exec:java -Dexec.mainClass="org.cs223.Main" \
 mvn exec:java -Dexec.mainClass="org.cs223.Main" \
   -Dexec.args="--workload 2 --protocol occ --threads 4 --contention 0.2 --hotset 10 --transactions 1000"
 
-# Workload 2, Conservative 2PL, 16 threads
+# Workload 2, Conservative 2PL, 8 threads
 mvn exec:java -Dexec.mainClass="org.cs223.Main" \
-  -Dexec.args="--workload 2 --protocol 2pl --threads 16 --contention 0.5 --hotset 10 --transactions 1000"
+  -Dexec.args="--workload 2 --protocol 2pl --threads 8 --contention 0.5 --hotset 10 --transactions 1000"
 ```
 
 ## Workloads
@@ -81,7 +81,7 @@ mvn exec:java -Dexec.mainClass="org.cs223.Main" \
    - **Check 2**: For every such transaction that has not yet finished its write phase, verify that its write set does not overlap with our write set (`WS(Tj) ∩ WS(Ti) = ∅`). This prevents concurrent write conflicts
    - If both checks pass: add this transaction to the `validated` set and return
    - If either check fails: return failure and abort
-4. **Write phase**: Apply the private write buffer to RocksDB. This happens **outside** the validation lock, allowing other transactions to validate concurrently
+4. **Write phase**: Apply the private write buffer to RocksDB. This happens **outside** the `synchronized` block, allowing other transactions to validate concurrently
 5. **Finish**: Mark the transaction as `finished` so future transactions can add it to their ignore set
 
 **On abort**: The transaction retries immediately with newly selected keys. Unlike Conservative 2PL, OCC does not use backoff because there is no risk of livelock — conflicts are detected at validation time and the failing transaction simply restarts
@@ -128,7 +128,7 @@ Use `org.cs223.Main` with command-line arguments to run a single experiment (see
 
 Each run automatically exports results to the `results/` directory:
 - `results/summary.csv` — one row appended per run with throughput, retry rate, avg response time
-- `results/rt_w1_OCC_t4_c0.50.csv` — per-transaction response times for that run
+- `results/rt_w1_OCC_t4_c0.50_h10.csv` — per-transaction response times for that run
 
 ### Batch Run (All Combinations)
 
@@ -138,6 +138,7 @@ Run `org.cs223.ExperimentRunner` to automatically execute all parameter combinat
 - **Protocols**: OCC and Conservative 2PL
 - **Thread counts**: 1, 2, 4, 8
 - **Contention levels**: 0, 0.2, 0.5, 0.8, 1.0
+- **Hotset sizes**: 5, 10, 20, 50, 100
 
 This runs **400 experiments** sequentially (2 × 2 × 4 × 5 × 5). Each experiment creates a fresh database, loads the workload data, executes 10,000 transactions, and exports results.
 
@@ -205,6 +206,21 @@ Each run prints:
 - Average response time (ms, from transaction begin to commit)
 - Per-template breakdown for Workload 2 (NewOrder vs Payment stats)
 
+## Plotting
+
+A Python plotting script is provided at `src/main/java/org/cs223/cs223_make_plots.py`. To generate graphs:
+
+```bash
+# First zip the per-transaction response time CSVs
+cd results && zip results.zip rt_*.csv && cd ..
+
+# Run the plotting script
+python src/main/java/org/cs223/cs223_make_plots.py
+```
+
+Generated plots are saved to `results/analysis_out/plots/` with subdirectories for required plots, extra plots, and distribution plots.
+
 ## Dependencies
 
-- [RocksDB](https://rocksdb.org/) via `rocksdbjni 9.6.1` (managed by Maven, no manual installation needed)
+- **Java**: [RocksDB](https://rocksdb.org/) via `rocksdbjni 9.6.1` (managed by Maven, no manual installation needed)
+- **Python** (for plotting only): `pandas`, `numpy`, `matplotlib`, optionally `seaborn`
